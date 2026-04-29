@@ -8,6 +8,9 @@ import datetime
 
 app = FastAPI()
 
+# Mount static files (styles.css, etc)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # Excel data paths
 BORROWINGS_FILE = "borrowings.xlsx"
 PRODUCTS_FILE = "financial_products.xlsx"
