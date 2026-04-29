@@ -11,22 +11,40 @@ def parse_borrowings(file_path):
         wb = openpyxl.load_workbook(file_path, data_only=True)
         sheet = wb.active
         borrowings = []
+        last_bank = None
+        last_product_type = None
+        
         for row in sheet.iter_rows(min_row=6, values_only=True):
-            bank = row[2]
-            if bank == '계' or bank is None: continue
-            try:
-                item = {
-                    'bank': bank,
-                    'product_type': row[3],
-                    'amount': row[5],
-                    'rate': row[13],
-                    'maturity_date': row[16],
-                    'execution_date': row[15],
-                    'account_no': row[4],
-                    'currency': 'KRW' # Default for borrowings
-                }
-                borrowings.append(item)
-            except: continue
+            # Update last known values if current row has them
+            if row[2] and str(row[2]).strip() not in ['', '계']:
+                last_bank = row[2]
+            if row[3]:
+                last_product_type = row[3]
+                
+            # Skip total rows or empty rows
+            if row[2] == '계' or all(x is None for x in row):
+                continue
+                
+            # Valid row must have an account number (row[4]) and a numeric amount (row[5])
+            if row[4] and last_bank:
+                amount = row[5]
+                # Check if amount is numeric (to skip rows that are notes or shifted dates)
+                if not isinstance(amount, (int, float)):
+                    continue
+                    
+                try:
+                    item = {
+                        'bank': last_bank,
+                        'product_type': last_product_type or row[3],
+                        'amount': amount,
+                        'rate': row[13],
+                        'maturity_date': row[16],
+                        'execution_date': row[15],
+                        'account_no': str(row[4]),
+                        'currency': 'KRW'
+                    }
+                    borrowings.append(item)
+                except: continue
         return borrowings
     except: return []
 
@@ -37,13 +55,20 @@ def parse_financial_products(file_path):
         wb = openpyxl.load_workbook(file_path, data_only=True)
         sheet = wb.active
         products = []
+        last_bank = None
+        
         # Header is at row 1
         for row in sheet.iter_rows(min_row=2, values_only=True):
-            bank = row[0]
-            if bank is None: continue
+            if row[0]:
+                last_bank = row[0]
+            
+            # Skip empty rows or rows without a product name
+            if not row[1] or all(x is None for x in row):
+                continue
+                
             try:
                 item = {
-                    'bank': bank,
+                    'bank': last_bank or row[0],
                     'product_name': row[1],
                     'type': row[2], # 수시/기간
                     'currency': row[3],

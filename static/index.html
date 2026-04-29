@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Treasury Auto Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">TREASURY AUTO</div>
+            <div class="header-actions">
+                <span id="lastUpdated" style="color: var(--text-muted); font-size: 0.8rem; margin-right: 1rem;"></span>
+                <button class="refresh-btn" onclick="fetchData()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+        </header>
+
+        <div class="summary-grid">
+            <div class="stat-card">
+                <div class="stat-label">총 차입금</div>
+                <div class="stat-value" id="totalBorrowings">₩0</div>
+                <div class="stat-trend" style="color: #fb7185"><i class="fas fa-arrow-trend-up"></i> Liabilities</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">총 금융상품 (KRW)</div>
+                <div class="stat-value" id="totalProducts">₩0</div>
+                <div class="stat-trend" style="color: #34d399"><i class="fas fa-arrow-trend-up"></i> Assets</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">순 포지션</div>
+                <div class="stat-value" id="netPosition">₩0</div>
+                <div class="stat-trend" id="netTrend">Net Worth</div>
+            </div>
+        </div>
+
+        <div class="charts-container" style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem; margin-bottom: 3rem;">
+            <div class="stat-card" style="padding: 1.5rem;">
+                <h3 class="section-title" style="font-size: 1.1rem; margin-bottom: 1rem;">자산 부채 비중</h3>
+                <canvas id="compositionChart"></canvas>
+            </div>
+            <div class="stat-card" style="padding: 1.5rem;">
+                <h3 class="section-title" style="font-size: 1.1rem; margin-bottom: 1rem;">월별 만기 분포</h3>
+                <canvas id="maturityChart"></canvas>
+            </div>
+        </div>
+
+        <section class="data-section">
+            <h2 class="section-title"><i class="fas fa-hand-holding-dollar"></i> 차입금 현황</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>은행</th>
+                            <th>구분</th>
+                            <th>금액</th>
+                            <th>이율</th>
+                            <th>실행일</th>
+                            <th>만기일</th>
+                            <th>계좌번호</th>
+                        </tr>
+                    </thead>
+                    <tbody id="borrowingsBody">
+                        <!-- Data will be injected here -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="data-section">
+            <h2 class="section-title"><i class="fas fa-vault"></i> 금융상품 현황</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>은행</th>
+                            <th>상품명</th>
+                            <th>구분</th>
+                            <th>통화</th>
+                            <th>금액</th>
+                            <th>이율</th>
+                            <th>만기일</th>
+                        </tr>
+                    </thead>
+                    <tbody id="productsBody">
+                        <!-- Data will be injected here -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        let compositionChart, maturityChart;
+
+        function formatNumber(num) {
+            return new Intl.NumberFormat('ko-KR').format(num);
+        }
+
+        function getDDay(dateStr) {
+            if (!dateStr || dateStr === '-') return '-';
+            const target = new Date(dateStr);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const diffTime = target - today;
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            if (diffDays === 0) return '<span class="d-day-high">D-Day</span>';
+            if (diffDays > 0) {
+                const className = diffDays <= 10 ? 'd-day-high' : (diffDays <= 30 ? 'd-day-mid' : '');
+                return `<span class="${className}">D-${diffDays}</span>`;
+            }
+            return `<span style="color: var(--text-muted)">만기경과</span>`;
+        }
+
+        function initCharts(data) {
+            const ctx1 = document.getElementById('compositionChart').getContext('2d');
+            const ctx2 = document.getElementById('maturityChart').getContext('2d');
+
+            if (compositionChart) compositionChart.destroy();
+            if (maturityChart) maturityChart.destroy();
+
+            compositionChart = new Chart(ctx1, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(data.charts.composition),
+                    datasets: [{
+                        data: Object.values(data.charts.composition),
+                        backgroundColor: ['#fb7185', '#34d399'],
+                        borderWidth: 0,
+                        hoverOffset: 10
+                    }]
+                },
+                options: {
+                    plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', font: { family: 'Outfit' } } } },
+                    cutout: '70%'
+                }
+            });
+
+            maturityChart = new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(data.charts.maturity_dist),
+                    datasets: [{
+                        label: '만기 금액',
+                        data: Object.values(data.charts.maturity_dist),
+                        backgroundColor: '#6366f1',
+                        borderRadius: 8
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } },
+                        x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        async function fetchData() {
+            try {
+                const response = await fetch('/api/data');
+                const data = await response.json();
+
+                // Update Summary
+                document.getElementById('totalBorrowings').innerText = '₩' + formatNumber(data.summary.total_borrowings);
+                document.getElementById('totalProducts').innerText = '₩' + formatNumber(data.summary.total_products);
+                
+                const net = data.summary.net_position;
+                const netElem = document.getElementById('netPosition');
+                netElem.innerText = (net >= 0 ? '+' : '-') + '₩' + formatNumber(Math.abs(net));
+                netElem.style.color = net >= 0 ? '#34d399' : '#fb7185';
+                
+                document.getElementById('lastUpdated').innerText = 'Last updated: ' + new Date().toLocaleTimeString();
+
+                // Update Charts
+                initCharts(data);
+
+                // Update Borrowings
+                const bBody = document.getElementById('borrowingsBody');
+                bBody.innerHTML = data.borrowings.map(b => `
+                    <tr>
+                        <td><strong>${b.bank}</strong></td>
+                        <td><span class="badge badge-borrow">${b.product_type}</span></td>
+                        <td>${formatNumber(b.amount)}</td>
+                        <td>${b.rate}%</td>
+                        <td>${b.execution_date ? b.execution_date.split('T')[0] : '-'}</td>
+                        <td>${b.maturity_date ? b.maturity_date.split('T')[0] : '-'} ${getDDay(b.maturity_date)}</td>
+                        <td style="color: var(--text-muted)">${b.account_no}</td>
+                    </tr>
+                `).join('');
+
+                // Update Products
+                const pBody = document.getElementById('productsBody');
+                pBody.innerHTML = data.products.map(p => `
+                    <tr>
+                        <td><strong>${p.bank}</strong></td>
+                        <td>${p.product_name}</td>
+                        <td><span class="badge badge-product">${p.type}</span></td>
+                        <td>${p.currency}</td>
+                        <td>${formatNumber(p.amount)}</td>
+                        <td>${p.rate}%</td>
+                        <td>${p.maturity_date ? p.maturity_date.split('T')[0] : '-'} ${getDDay(p.maturity_date)}</td>
+                    </tr>
+                `).join('');
+
+            } catch (error) {
+                console.error('Error fetching data:', error);
+            }
+        }
+
+        // Initial fetch
+        fetchData();
+    </script>
+</body>
+</html>

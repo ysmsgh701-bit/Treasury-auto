@@ -68,14 +68,14 @@ class NotionSync:
                 # Update existing
                 page_id = results[0]["id"]
                 self.notion.pages.update(page_id=page_id, properties=properties)
-                # print(f"Updated: {unique_name}")
+                print(f"Updated: {unique_name}")
             else:
                 # Create new
                 self.notion.pages.create(
                     parent={"database_id": self.database_id},
                     properties=properties
                 )
-                # print(f"Created: {unique_name}")
+                print(f"Created: {unique_name}")
         except Exception as e:
             print(f"Error syncing {unique_name}: {e}")
 
